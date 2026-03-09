@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+dist/
+build/
+.git
+.env
+.idea/
+.vscode/
+.venv/
+venv/
+gateway/scripts/client_secret.json
