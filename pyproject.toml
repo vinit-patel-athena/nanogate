@@ -28,6 +28,7 @@ dependencies = [
 
 [project.scripts]
 nanogate = "gateway.server:main"
+nanogate-agent = "agent.server:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -37,7 +38,7 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["gateway"]
+packages = ["gateway", "agent"]
 
 [tool.ruff]
 line-length = 100

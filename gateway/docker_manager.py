@@ -34,6 +34,8 @@ def find_free_port() -> int:
 class DockerManager:
     """Orchestrates Nanobot containers per tenant."""
 
+    DEFAULT_IMAGE = "nanogate:latest"
+
     def __init__(self, base_dir: str = "/tmp/nanogate/tenants") -> None:
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -41,6 +43,25 @@ class DockerManager:
         if not self._client:
             logger.warning("Docker SDK is missing or Docker is not running. Using mock manager.")
         self._tenants: dict[str, TenantContainer] = {}
+        self.ensure_image()
+
+    def ensure_image(self, image: str | None = None) -> None:
+        """Build the nanogate Docker image if it doesn't exist."""
+        if not self._client:
+            return
+        image = image or self.DEFAULT_IMAGE
+        try:
+            self._client.images.get(image)
+            logger.info(f"Docker image '{image}' found.")
+        except docker.errors.ImageNotFound:
+            project_root = Path(__file__).parent.parent
+            dockerfile = project_root / "Dockerfile"
+            if not dockerfile.is_file():
+                logger.warning(f"Image '{image}' not found and no Dockerfile at {dockerfile}.")
+                return
+            logger.info(f"Image '{image}' not found. Building from {project_root}...")
+            self._client.images.build(path=str(project_root), tag=image, rm=True)
+            logger.info(f"Image '{image}' built successfully.")
 
     def get_tenant(self, tenant_id: str) -> TenantContainer | None:
         return self._tenants.get(tenant_id)
@@ -91,7 +112,7 @@ class DockerManager:
                     logger.error(f"Error removing container for tenant {tenant_id}: {e}")
 
     def provision_tenant(
-        self, tenant_id: str, config_data: dict[str, Any], image: str = "hkuds/nanobot:latest"
+        self, tenant_id: str, config_data: dict[str, Any], image: str = "nanogate:latest"
     ) -> TenantContainer:
         """Provision a new Docker container for the given tenant config."""
         if not self._client:
@@ -102,18 +123,8 @@ class DockerManager:
         tenant_dir, host_workspace = self.write_config(tenant_id, config_data)
         port = find_free_port()
         
-        # Ensure image exists locally
-        try:
-            self._client.images.get(image)
-        except docker.errors.ImageNotFound:
-            logger.info(f"Image {image} not found locally. Attempting to pull...")
-            try:
-                self._client.images.pull(image)
-            except docker.errors.ImageNotFound:
-                raise RuntimeError(
-                    f"Docker image '{image}' could not be found locally or pulled from the registry. "
-                    f"Please build it locally (e.g., `docker build -t {image} .`) or check the image name."
-                )
+        # Ensure image exists (built at startup, but check again as fallback)
+        self.ensure_image(image)
 
         # Run container
         # Note: the container expects config at ~ /root/.nanobot/config.json 
@@ -157,7 +168,7 @@ class DockerManager:
             ports={"8765/tcp": port},
             environment=custom_env,
             volumes=volumes,
-            command="python -m nanobot.gateway.server" # Starts the internal API Gateway inside the container
+            command="python -m agent.server" # Starts the single-tenant agent server inside the container
         )
 
         tc = TenantContainer(
