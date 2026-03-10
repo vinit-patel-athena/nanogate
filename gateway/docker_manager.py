@@ -129,14 +129,26 @@ class DockerManager:
 
         logger.info(f"Starting {container_name} on port {port}...")
         
-        # Mount gateway scripts with the EXACT same absolute path as the host
-        gateway_scripts = Path(__file__).parent / "scripts"
-        host_scripts_path = str(gateway_scripts.resolve())
-        container_scripts_path = host_scripts_path
-        
         # Extract any custom environment variables mapped for the gateway
         gateway_config = config_data.get("gateway", {})
         custom_env = gateway_config.get("env", {})
+        
+        # Build volume mounts
+        volumes = {
+            str(tenant_dir): {"bind": "/root/.nanobot", "mode": "rw"},
+            str(host_workspace): {"bind": "/root/.nanobot/workspace", "mode": "rw"},
+        }
+        
+        # Mount tenant-provided scripts directory if specified
+        scripts_dir = gateway_config.get("scriptsDir")
+        if scripts_dir:
+            host_scripts = Path(scripts_dir).expanduser().resolve()
+            if not host_scripts.is_dir():
+                raise RuntimeError(
+                    f"gateway.scriptsDir '{scripts_dir}' does not exist or is not a directory."
+                )
+            volumes[str(host_scripts)] = {"bind": "/app/tenant_scripts", "mode": "ro"}
+            logger.info(f"[{tenant_id}] Mounting scriptsDir: {host_scripts} -> /app/tenant_scripts")
         
         container = self._client.containers.run(
             image,
@@ -144,11 +156,7 @@ class DockerManager:
             detach=True,
             ports={"8765/tcp": port},
             environment=custom_env,
-            volumes={
-                str(tenant_dir): {"bind": "/root/.nanobot", "mode": "rw"},
-                str(host_workspace): {"bind": "/root/.nanobot/workspace", "mode": "rw"},
-                host_scripts_path: {"bind": container_scripts_path, "mode": "ro"}
-            },
+            volumes=volumes,
             command="python -m nanobot.gateway.server" # Starts the internal API Gateway inside the container
         )
 

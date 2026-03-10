@@ -1,10 +1,10 @@
 """
 Multi-agent HTTP gateway: chat API + tool gateway (approval + token injection).
 
-Run with: python -m gateway.server
-Or: uvicorn gateway.server:app --host 0.0.0.0 --port 8765
+Run with: uv run -m gateway.server
+Or: uv run uvicorn gateway.server:app --host 0.0.0.0 --port 8765
 
-Requires: pip install -e ".[api]"
+Requires: uv pip install -e ".[api]"
 """
 
 from __future__ import annotations
