@@ -4,10 +4,11 @@ import json
 import logging
 import socket
 import time
+import threading
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class TenantContainer(BaseModel):
     container_id: str
     port: int
     config_dir: str
+    last_activity: float = Field(default_factory=time.time)
 
 
 def find_free_port() -> int:
@@ -45,6 +47,11 @@ class DockerManager:
         self._tenants: dict[str, TenantContainer] = {}
         self.ensure_image()
 
+        # Background pruning loop for idle containers
+        self._stop_event = threading.Event()
+        self._prune_thread = threading.Thread(target=self._prune_loop, name="container-pruner", daemon=True)
+        self._prune_thread.start()
+
     def ensure_image(self, image: str | None = None) -> None:
         """Build the nanogate Docker image if it doesn't exist."""
         if not self._client:
@@ -64,7 +71,35 @@ class DockerManager:
             logger.info(f"Image '{image}' built successfully.")
 
     def get_tenant(self, tenant_id: str) -> TenantContainer | None:
-        return self._tenants.get(tenant_id)
+        tc = self._tenants.get(tenant_id)
+        if tc:
+            tc.last_activity = time.time()
+        return tc
+
+    def touch(self, tenant_id: str) -> None:
+        """Update last activity timestamp for a tenant."""
+        if tc := self._tenants.get(tenant_id):
+            tc.last_activity = time.time()
+
+    def _prune_loop(self) -> None:
+        """Periodically remove containers that haven't been touched in a while (e.g., 30 mins)."""
+        idle_timeout = 1800 # 30 minutes
+        while not self._stop_event.wait(timeout=60):
+            try:
+                now = time.time()
+                to_prune = []
+                
+                # Use local copy of keys to avoid concurrent modification issues
+                for tid in list(self._tenants.keys()):
+                    tc = self._tenants.get(tid)
+                    if tc and (now - tc.last_activity > idle_timeout):
+                        to_prune.append(tid)
+                
+                for tid in to_prune:
+                    logger.info(f"Pruning idle tenant container: {tid}")
+                    self.stop_tenant(tid)
+            except Exception as e:
+                logger.error(f"Error in container pruning loop: {e}")
 
     def write_config(self, tenant_id: str, config_data: dict[str, Any]) -> tuple[Path, Path]:
         """Write a nanobot config.json for a specific tenant."""
@@ -150,6 +185,17 @@ class DockerManager:
             str(host_workspace): {"bind": "/root/.nanobot/workspace", "mode": "rw"},
         }
         
+        # Mount tenant-provided tools directory if specified
+        tools_dir = gateway_config.get("toolsDir")
+        if tools_dir:
+            host_tools = Path(tools_dir).expanduser().resolve()
+            if not host_tools.is_dir():
+                raise RuntimeError(
+                    f"gateway.toolsDir '{tools_dir}' does not exist or is not a directory."
+                )
+            volumes[str(host_tools)] = {"bind": "/app/tenant_tools", "mode": "ro"}
+            logger.info(f"[{tenant_id}] Mounting toolsDir: {host_tools} -> /app/tenant_tools")
+
         # Mount tenant-provided scripts directory if specified
         scripts_dir = gateway_config.get("scriptsDir")
         if scripts_dir:
@@ -196,6 +242,7 @@ class DockerManager:
         return tc
 
     def shutdown_all(self) -> None:
-        """Stop all managed containers."""
+        """Stop all managed containers and pruning thread."""
+        self._stop_event.set()
         for tenant_id in list(self._tenants.keys()):
             self.stop_tenant(tenant_id)

@@ -1,16 +1,14 @@
-"""Approval route for the single-tenant agent server."""
-
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent.tool_gateway import ToolGateway, truncate_text
-
+def truncate_text(text: str, max_chars: int = 4000) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n... (truncated {len(text) - max_chars} chars)"
 
 class ApproveBody(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -20,35 +18,60 @@ class ApproveBody(BaseModel):
     resume_on_failure: bool = Field(default=False, alias="resumeOnFailure")
 
 
-def _load_exec_settings() -> tuple[int, str]:
-    config_path = Path.home() / ".nanobot" / "config.json"
-    timeout, path_append = 60, ""
-    if config_path.is_file():
-        try:
-            data = json.loads(config_path.read_text())
-            exec_cfg = (data.get("tools") or {}).get("exec") or {}
-            timeout = int(exec_cfg.get("timeout", 60))
-            path_append = str(exec_cfg.get("pathAppend", ""))
-        except Exception:
-            pass
-    return timeout, path_append
-
-
-def build_approval_router(get_agent: Callable, tool_gateway: ToolGateway) -> APIRouter:
+def build_approval_router(get_agent: Callable) -> APIRouter:
     router = APIRouter()
 
+    @router.get("/approvals/pending")
+    async def list_pending_approvals() -> list[dict[str, Any]]:
+        """Return all pending approval requests across all registered tools.
+        
+        Each item includes the request_id, which tool owns it, and any context
+        the tool provided (e.g. the command being requested).
+        """
+        agent_loop = get_agent()
+        if not agent_loop:
+            raise HTTPException(status_code=503, detail="Agent not initialized")
+
+        pending_approvals: list[dict[str, Any]] = []
+        for name in agent_loop.tools.tool_names:
+            tool = agent_loop.tools.get(name)
+            if hasattr(tool, "pending"):
+                for request_id, info in getattr(tool, "pending", {}).items():
+                    pending_approvals.append({
+                        "request_id": request_id,
+                        "tool": name,
+                        "session_id": info.get("session_key"),
+                        "command": info.get("command"),
+                        "cwd": info.get("cwd"),
+                        "description": f"Execute shell command: `{info.get('command')}`",
+                    })
+        return pending_approvals
+
     @router.post("/approve")
+
     async def approve(payload: ApproveBody = Body(...)) -> dict[str, Any]:
-        if payload.request_id not in tool_gateway.pending:
+        agent_loop = get_agent()
+        if not agent_loop:
+            raise HTTPException(status_code=503, detail="Agent not initialized")
+
+        # Dynamically find which custom tool plugin currently owns this pending approval request 
+        approved_tool = None
+        for name in agent_loop.tools.tool_names:
+            tool = agent_loop.tools.get(name)
+            if hasattr(tool, "run_approved") and hasattr(tool, "pending"):
+                if payload.request_id in getattr(tool, "pending", {}):
+                    approved_tool = tool
+                    break
+
+        if not approved_tool:
             raise HTTPException(
                 status_code=400,
-                detail=f"No pending approval for request_id: {payload.request_id}",
+                detail=f"No pending approval found across any custom tools for request_id: {payload.request_id}",
             )
 
-        timeout, path_append = _load_exec_settings()
-        success, output, exit_code, pending = await tool_gateway.run_approved(
-            payload.request_id, timeout=timeout, path_append=path_append
-        )
+        # Resume the specific tool's execution natively
+        success, output, exit_code, pending = await approved_tool.run_approved(payload.request_id)
+        
         if not success:
             raise HTTPException(status_code=400, detail=output)
 
@@ -60,9 +83,8 @@ def build_approval_router(get_agent: Callable, tool_gateway: ToolGateway) -> API
         if pending:
             response["approved_command"] = str(pending.get("command", ""))
 
-        agent_loop = get_agent()
         should_resume = payload.auto_resume and (exit_code == 0 or payload.resume_on_failure)
-        if should_resume and agent_loop is not None and pending:
+        if should_resume and pending:
             command = str(pending.get("command", ""))
             session_key = str(pending.get("session_key", "api:direct"))
             channel = str(pending.get("channel", "api"))

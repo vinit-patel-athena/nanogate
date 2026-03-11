@@ -242,6 +242,7 @@
             "setupCommands": [
                 "npm install -g @googleworkspace/cli"
             ],
+            "toolsDir": "./sample/tools",
             "scriptsDir": "./sample/scripts",
             "env": {
                 "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE": "/app/tenant_scripts/client_secret.json"

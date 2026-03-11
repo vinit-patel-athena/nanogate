@@ -26,6 +26,14 @@ dependencies = [
     "docker>=7.1.0",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-xdist>=3.5",
+    "aiohttp>=3.9",
+]
+
 [project.scripts]
 nanogate = "gateway.server:main"
 nanogate-agent = "agent.server:main"
@@ -47,3 +55,10 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
 ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: marks tests that require a running nanogate gateway (deselect with -m 'not integration')",
+]

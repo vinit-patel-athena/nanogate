@@ -17,7 +17,7 @@ A multi-tenant API Gateway and Docker orchestrator for the [nanobot](https://git
 
 1. **API Gateway** — Exposes `/api/tenant/config`, `/api/chat`, `/api/approve` for managing tenant sessions.
 2. **Container Provisioning** — Translates tenant JSON configs into isolated Docker containers.
-3. **Dynamic Setup** — Installs packages via `setupCommands` and mounts tenant scripts via `scriptsDir`.
+3. **Dynamic Setup** — Installs packages via `setupCommands` and mounts tenant custom plugins via `toolsDir` and scripts via `scriptsDir`.
 4. **Proxy** — Forwards chat and approval traffic to the correct container.
 5. **Tool Gateway** — Injects ephemeral OAuth tokens into tool commands (like `gws`) at execution time.
 
@@ -34,7 +34,7 @@ sequenceDiagram
     %% Provisioning Phase
     Note over User,Gateway: 1. Provisioning
     User->>Gateway: POST /api/tenant/config (config.json)
-    Gateway->>Docker: Pull image, mount scriptsDir, map port
+    Gateway->>Docker: Pull image, mount toolsDir/scriptsDir, map port
     Docker-->>Gateway: Container started (Port X)
     Gateway->>Agent: Run setupCommands (npm install, etc.)
     Gateway-->>User: {tenant_id, port: X}
@@ -89,7 +89,7 @@ uv run -m gateway.server
 
 ### 1. Provision a Tenant
 
-Use `gateway.scriptsDir` to mount your own scripts (token providers, etc.) into the container at `/app/tenant_scripts`:
+Use `gateway.toolsDir` to mount your own python `Tool` plugins into `/app/tenant_tools`, and `gateway.scriptsDir` to mount your own execution scripts (token providers, etc.) into the container at `/app/tenant_scripts`:
 
 ```bash
 curl -X POST http://localhost:8765/api/tenant/config \
@@ -98,6 +98,7 @@ curl -X POST http://localhost:8765/api/tenant/config \
   "tenant_id": "tenant-xyz",
   "config": {
     "gateway": {
+      "toolsDir": "/path/to/my/plugins",
       "scriptsDir": "/path/to/my/scripts",
       "setupCommands": ["npm install -g @googleworkspace/cli"],
       "env": {
@@ -163,7 +164,8 @@ nanogate/
 │
 └── sample/
     ├── tenant_config.json    # Example tenant configuration
-    └── scripts/              # Example token provider scripts
+    ├── tools/                # Example custom `Tool` plugins
+    └── scripts/              # Example token provider execution scripts
 ```
 
 ## Requirements

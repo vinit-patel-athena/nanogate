@@ -7,16 +7,11 @@ from __future__ import annotations
 
 from nanobot.config import get_data_dir, load_config
 from nanobot.utils.helpers import sync_workspace_templates
+from agent.plugin_loader import discover_tools
 
 
-def create_agent_loop(client_id: str | None = None, approval_hook=None):
-    """Build AgentLoop for the agent server from config.
-
-    When *approval_hook* is provided the built-in ``exec`` tool is replaced
-    with a :class:`GatewayExecTool` that runs the hook **at the tool level**.
-    This keeps tool-call → tool-result → assistant-response intact in session
-    history so the LLM does not try to mimic approval messages on follow-ups.
-    """
+def create_agent_loop(client_id: str | None = None):
+    """Build AgentLoop for the agent server from config."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.cli.commands import _make_provider
@@ -40,7 +35,6 @@ def create_agent_loop(client_id: str | None = None, approval_hook=None):
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
         reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
@@ -52,11 +46,13 @@ def create_agent_loop(client_id: str | None = None, approval_hook=None):
         channels_config=config.channels,
     )
 
-    if approval_hook is not None:
-        from agent.exec_tool import GatewayExecTool
-
-        original_exec = loop.tools.get("exec")
-        if original_exec is not None:
-            loop.tools.register(GatewayExecTool(original_exec, approval_hook))
+    # Auto-discover and register any custom python tools provided by the tenant
+    for custom_tool in discover_tools():
+        try:
+            loop.tools.register(custom_tool)
+        except Exception as e:
+            # Continue loading other tools even if one fails
+            import logging
+            logging.getLogger(__name__).error(f"Failed to register custom tool {custom_tool}: {e}")
 
     return loop

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException
+import httpx
+from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel
 
 from gateway.registry import AgentRegistry
@@ -29,5 +30,45 @@ def build_tenant_router(registry: AgentRegistry) -> APIRouter:
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-            
+
+    @router.api_route("/tenant/container/{tenant_id}/proxy/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+    async def proxy_tenant(tenant_id: str, path: str, request: Request):
+        """Generic proxy to a specific tenant's container for non-chat APIs (e.g. status, internal tools)."""
+        tc = registry.get_tenant_container(tenant_id)
+        if not tc:
+            raise HTTPException(status_code=404, detail=f"Tenant {tenant_id} not found")
+
+        url = f"http://localhost:{tc.port}/{path}"
+        async with httpx.AsyncClient() as client:
+            try:
+                # Forward query params
+                params = request.query_params
+                
+                # Forward body if present
+                content = await request.body()
+                
+                resp = await client.request(
+                    method=request.method,
+                    url=url,
+                    params=params,
+                    content=content,
+                    headers={"Content-Type": request.headers.get("Content-Type", "application/json")},
+                    timeout=30.0
+                )
+                
+                if resp.status_code >= 400:
+                    try:
+                        detail = resp.json()
+                    except:
+                        detail = resp.text
+                    raise HTTPException(status_code=resp.status_code, detail=detail)
+                
+                # Some APIs might not return JSON (though nanogate/agent usually does)
+                try:
+                    return resp.json()
+                except:
+                    return resp.text
+            except httpx.RequestError as e:
+                raise HTTPException(status_code=502, detail=f"Proxy error: {e}")
+
     return router

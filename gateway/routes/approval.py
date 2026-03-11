@@ -43,6 +43,7 @@ def build_approval_router(registry: AgentRegistry) -> APIRouter:
                 try:
                     resp = await client.post(url, json=payload, timeout=120.0)
                     if resp.status_code == 200:
+                        registry.manager.touch(tc.tenant_id)
                         return resp.json()
                     elif resp.status_code != 400: # Could be standard bad request if not their pending id
                         pass

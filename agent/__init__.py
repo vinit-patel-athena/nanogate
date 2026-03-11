@@ -6,5 +6,6 @@ No multi-tenant registry — each container runs exactly one agent.
 """
 
 from agent.server import app, main
+from nanobot.agent.tools.base import Tool
 
-__all__ = ["app", "main"]
+__all__ = ["app", "main", "Tool"]
