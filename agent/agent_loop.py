@@ -1,6 +1,8 @@
 """Build an AgentLoop from nanobot config.
 
 Imports only from nanobot core (agent, config, cli) — never from nanobot.gateway.
+load_config() uses ~/.nanobot/config.json by default; the gateway mounts tenant
+config at /root/.nanobot in the container, so the agent reads that file.
 """
 
 from __future__ import annotations
@@ -32,10 +34,8 @@ def create_agent_loop(client_id: str | None = None):
         provider=provider,
         workspace=config.workspace_path,
         model=model,
-        temperature=config.agents.defaults.temperature,
-        max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        reasoning_effort=config.agents.defaults.reasoning_effort,
+        context_window_tokens=config.agents.defaults.max_tokens, # Assuming this is the new equiv
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,

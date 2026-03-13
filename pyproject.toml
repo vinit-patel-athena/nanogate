@@ -23,6 +23,7 @@ dependencies = [
     "pydantic>=2.12.0",
     "pydantic-settings>=2.12.0",
     "httpx>=0.28.0",
+    "redis>=5.0.0",
     "docker>=7.1.0",
 ]
 
@@ -31,6 +32,7 @@ test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-xdist>=3.5",
+    "pytest-timeout>=2.3",
     "aiohttp>=3.9",
 ]
 
@@ -46,7 +48,7 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["gateway", "agent"]
+packages = ["gateway", "agent", "nanogate"]
 
 [tool.ruff]
 line-length = 100
@@ -59,6 +61,7 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+timeout = 90
 markers = [
     "integration: marks tests that require a running nanogate gateway (deselect with -m 'not integration')",
 ]

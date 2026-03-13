@@ -29,10 +29,10 @@ def build_approval_router(registry: AgentRegistry) -> APIRouter:
         tenant_id = payload.get("tenant_id") or payload.get("tenantId")
         if tenant_id:
             targets = [registry.get_tenant_container(tenant_id)]
-            targets = [t for t in targets if t is not None]
+            targets = [t for t in targets if t is not None and t.port]
         else:
             # Broadcast hunt
-            targets = list(registry.manager._tenants.values())
+            targets = [t for t in registry.manager._tenants.values() if t.port]
         
         if not targets:
             raise HTTPException(status_code=400, detail="No active tenants to route approval to.")

@@ -5,6 +5,7 @@ from contextvars import ContextVar, Token
 from typing import Any
 
 from gateway.docker_manager import DockerManager, TenantContainer
+from nanogate.bus import RedisMessageBus
 
 ACTIVE_TENANT: ContextVar[str | None] = ContextVar("active_tenant", default=None)
 
@@ -21,10 +22,12 @@ DEFAULT_TENANT_ID = os.environ.get("TENANT_ID", "default")
 
 
 class AgentRegistry:
-    """Manages Docker container instances keyed by tenant_id."""
+    """Manages Docker container instances and Message Bus keyed by tenant_id."""
 
     def __init__(self) -> None:
-        self.manager = DockerManager()
+        redis_url = os.environ.get("NANOGATE_REDIS_URL", "redis://localhost:6379")
+        self.manager = DockerManager(redis_url=redis_url)
+        self.message_bus = RedisMessageBus(redis_url)
 
     def get_tenant_container(self, tenant_id: str) -> TenantContainer | None:
         """Get the container mapping for a tenant."""
@@ -39,14 +42,14 @@ class AgentRegistry:
         pass
         
     async def get_or_create(self, tenant_id: str) -> Any:
-        # Backward compatibility for any straggling references, 
-        # though the gateway shouldn't dynamically create blank environments 
-        # without a config payload anymore.
+        # Check if tenant exists (in memory or still running); if not, resume from Redis or provision with default config
         tc = self.get_tenant_container(tenant_id)
         if not tc:
-            # Create with an empty dictionary just to spin up default nanobot
-            tc = self.provision_tenant(tenant_id, {})
+            saved_config = self.manager.get_saved_state(tenant_id)
+            config = saved_config if saved_config else {}
+            tc = self.provision_tenant(tenant_id, config)
         return tc
 
     async def shutdown_all(self) -> None:
+        await self.message_bus.close()
         self.manager.shutdown_all()

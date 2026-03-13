@@ -9,6 +9,7 @@ Requires: pip install -e ".[api]"
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 try:
@@ -28,11 +29,24 @@ registry = AgentRegistry()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Install dispatcher hook and pre-create the default agent."""
+    """Install dispatcher hook, initialize bus workers and default agent."""
+    from gateway.webhook_dispatcher import WebhookDispatcher
+    
     registry.install_hook()
     await registry.get_or_create(DEFAULT_TENANT_ID)
+    
+    # Start the global webhook dispatcher worker
+    dispatcher = WebhookDispatcher(registry.message_bus)
+    dispatcher_task = asyncio.create_task(dispatcher.start())
+    
     yield
+    
+    dispatcher.stop()
     await registry.shutdown_all()
+    try:
+        await asyncio.wait_for(dispatcher_task, timeout=5.0)
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        pass
 
 
 app = FastAPI(

@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml .
 COPY gateway/ gateway/
 COPY agent/ agent/
+COPY nanogate/ nanogate/
 
 RUN pip install --no-cache-dir .
 
