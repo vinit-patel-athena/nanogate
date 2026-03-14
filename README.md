@@ -31,34 +31,34 @@ flowchart TB
             Reg[AgentRegistry]
             Bus[RedisMessageBus]
             WH[WebhookDispatcher]
-            API --> Reg
-            Reg --> DM
-            Reg --> Bus
-            API --> Bus
-            WH --> Bus
+            API -->|"Manage tenants"| Reg
+            Reg -->|"Provisioning"| DM
+            Reg -->|"Shared bus"| Bus
+            API -->|"SSE streams"| Bus
+            WH -->|"Webhook events"| Bus
         end
 
         Redis[(Redis)]
         Docker[Docker daemon]
-        Gateway --> Redis
+        Gateway -->|"Persist state"| Redis
     end
 
     subgraph Containers["Per-tenant containers"]
         A1[Agent tenant A]
         A2[Agent tenant B]
-        A1 --> Redis
-        A2 --> Redis
+        A1 -->|"Queue/Stream"| Redis
+        A2 -->|"Queue/Stream"| Redis
     end
 
     subgraph Tools["External"]
         CLI[CLI tools / MCP]
     end
 
-    User -->|"POST /api/chat, /api/tenant/config, /api/approve"| API
-    API -->|"SSE or callback"| User
-    DM --> Docker
-    Docker --> Containers
-    A1 --> CLI
+    User -->|"POST /chat, /config, /approve"| API
+    API -->|"SSE / Webhook callback"| User
+    DM -->|"Manage lifecycle"| Docker
+    Docker -->|"Spawn containers"| Containers
+    A1 -->|"Call tools"| CLI
 ```
 
 ### Components in detail
@@ -107,22 +107,22 @@ sequenceDiagram
     participant CLI as Tool
 
     User->>Gateway: POST /api/chat { message, tenantId, optional callbackUrl }
-    Gateway->>Redis: LPUSH tenant inbound
+    Gateway->>Redis: Queue chat request
     Gateway-->>User: { session_id, stream_url }
 
     par SSE
-        Gateway->>Redis: XREAD session stream
+        Gateway->>Redis: Subscribe to session events
         Redis-->>Gateway: progress / done / error
         Gateway-->>User: SSE events
     and Agent
-        Agent->>Redis: BRPOP tenant inbound
+        Agent->>Redis: Consume chat request
         Agent->>Agent: Run agent (nanobot)
-        Agent->>Redis: XADD session stream (progress)
-        Agent->>Redis: XADD session + global (done/error)
+        Agent->>Redis: Publish progress event
+        Agent->>Redis: Publish final result
     end
 
     opt callbackUrl set
-        Gateway->>Gateway: WebhookDispatcher XREADGROUP global
+        Gateway->>Gateway: WebhookDispatcher read global events
         Gateway->>User: POST final result to callbackUrl
     end
 ```
